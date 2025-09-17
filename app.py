@@ -49,6 +49,10 @@ labels_dict = {
 }
 
 
+# Track last prediction to avoid duplicates
+last_prediction = None
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -60,15 +64,17 @@ def handle_connect():
 
 
 def generate_frames():
+    global last_prediction
     cap = cv2.VideoCapture(0)
-   
+
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
 
-        frame = cv2.flip(frame, 1)  # Flip horizontally
+        frame = cv2.flip(frame, 1)
         H, W, _ = frame.shape
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -76,12 +82,8 @@ def generate_frames():
         results = hands.process(rgb_frame)
 
 
-        if not results.multi_hand_landmarks:
-            # No hand detected
-            socketio.emit('prediction', {'text': 'None', 'confidence': 0})
-        else:
+        if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                # Draw landmarks
                 mp_drawing.draw_landmarks(
                     frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
                     mp_styles.get_default_hand_landmarks_style(),
@@ -89,7 +91,6 @@ def generate_frames():
                 )
 
 
-                # Normalize landmarks like training
                 x_list = [lm.x for lm in hand_landmarks.landmark]
                 y_list = [lm.y for lm in hand_landmarks.landmark]
                 data_aux = []
@@ -98,29 +99,42 @@ def generate_frames():
                     data_aux.append(lm.y - min(y_list))
 
 
-                # Predict
                 try:
                     pred = model.predict([np.array(data_aux)])
                     pred_proba = model.predict_proba([np.array(data_aux)])
                     confidence = max(pred_proba[0])
-                    predicted_char = labels_dict[int(pred[0])]
+                    predicted_label = labels_dict[int(pred[0])]
 
 
-                    # Emit to frontend
-                    socketio.emit('prediction', {'text': predicted_char, 'confidence': confidence})
+                    # Only emit if confidence is high and prediction changed
+                    if confidence > 0.8 and predicted_label != last_prediction:
+                        last_prediction = predicted_label
 
 
-                    # Draw bounding box
+                        if predicted_label in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                            socketio.emit('letter_detected', {
+                                'letter': predicted_label,
+                                'confidence': confidence
+                            })
+                        else:
+                            socketio.emit('word_detected', {
+                                'word': predicted_label,
+                                'confidence': confidence
+                            })
+
+
+                    # Draw box + label
                     x1, y1 = int(min(x_list)*W)-10, int(min(y_list)*H)-10
                     x2, y2 = int(max(x_list)*W)+10, int(max(y_list)*H)+10
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0,0,0), 3)
-                    cv2.putText(frame, f"{predicted_char} ({confidence*100:.1f}%)", (x1, y1-10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,0), 3)
+                    cv2.putText(frame, f"{predicted_label} ({confidence*100:.1f}%)",
+                                (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,0), 3)
+
+
                 except Exception as e:
                     print("Prediction error:", e)
 
 
-        # Encode frame for streaming
         ret, buffer = cv2.imencode('.jpg', frame)
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
