@@ -7,25 +7,72 @@
     <style>
         body { text-align: center; font-family: Arial; }
         #video { border: 2px solid black; }
-        #prediction { font-size: 24px; font-weight: bold; margin-top: 10px; }
+        #current { font-size: 24px; font-weight: bold; margin-top: 10px; }
+        #letters, #words { font-size: 20px; margin-top: 15px; }
+        #letters { color: darkblue; }
+        #words { color: darkgreen; }
+        button { margin-top: 20px; padding: 10px 20px; font-size: 16px; }
     </style>
 </head>
 <body>
     <h1>ASL Detection App</h1>
     <img id="video" src="{{ url_for('video_feed') }}" width="640" height="480">
-    <div id="prediction">Detected Sign: None</div>
+   
+    <!-- Current prediction -->
+    <div id="current">Current: None</div>
+   
+    <!-- Sequence display -->
+    <div id="letters">Letters: </div>
+    <div id="words">Words: </div>
+
+
+    <!-- Clear button -->
+    <button onclick="clearSequences()">Clear</button>
 
 
     <script>
         var socket = io();
+        var letters = "";
+        var words = "";
 
 
-        socket.on('prediction', function(data){
-            document.getElementById('prediction').innerText =
-                "Detected Sign: " + data.text + " (" + (data.confidence*100).toFixed(1) + "%)";
+        socket.on('letter_detected', function(data) {
+            let letter = data.letter;
+            let confidence = (data.confidence * 100).toFixed(1);
+
+
+            document.getElementById('current').innerText =
+                "Current Letter: " + letter + " (" + confidence + "%)";
+
+
+            // Add letter only once
+            letters += letter;
+            document.getElementById('letters').innerText = "Letters: " + letters;
         });
+
+
+        socket.on('word_detected', function(data) {
+            let word = data.word;
+            let confidence = (data.confidence * 100).toFixed(1);
+
+
+            document.getElementById('current').innerText =
+                "Current Word: " + word + " (" + confidence + "%)";
+
+
+            // Append word with space
+            words += word + " ";
+            document.getElementById('words').innerText = "Words: " + words;
+        });
+
+
+        function clearSequences() {
+            letters = "";
+            words = "";
+            document.getElementById('letters').innerText = "Letters: ";
+            document.getElementById('words').innerText = "Words: ";
+            document.getElementById('current').innerText = "Current: None";
+        }
     </script>
 </body>
 </html>
-
-
